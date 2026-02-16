@@ -150,22 +150,24 @@ def _check_hard_stops(input_data, config, zip_tier):
 
 
 def _lookup_curve(value, curve, key_field):
-    """Walk a sorted curve and return the score for the highest matching bracket."""
+    """Walk a sorted curve and return (score, matched_entry)."""
     result = 0.0
+    matched = None
     for entry in curve:
         if value >= entry[key_field]:
             result = entry["score"]
+            matched = entry
         else:
             break
-    return result
+    return result, matched
 
 
 def _lookup_recency(days, curve):
-    """First bracket where max_days >= days wins."""
+    """First bracket where max_days >= days. Returns (score, matched_entry)."""
     for entry in curve:
         if days <= entry["max_days"]:
-            return entry["score"]
-    return 0.0
+            return entry["score"], entry
+    return 0.0, None
 
 
 def _compute_score(input_data, config, zip_tier):
@@ -174,38 +176,71 @@ def _compute_score(input_data, config, zip_tier):
     weights = scoring["weights"]
     mappings = scoring["mappings"]
 
-    zip_score = mappings["zip_tier"].get(zip_tier, 0.0)
-    hail_score = _lookup_curve(input_data["hail_size_in"], scoring["hail_size_curve"], "min")
-    storm_score = input_data["storm_confidence"]
-    recency_score = _lookup_recency(input_data["days_since_storm"], scoring["recency_curve_days"])
-    owner_score = mappings["owner_occupied"].get(input_data["owner_occupied"], 0.0)
+    hail_normalized, hail_bucket = _lookup_curve(
+        input_data["hail_size_in"], scoring["hail_size_curve"], "min"
+    )
+    recency_normalized, recency_bucket = _lookup_recency(
+        input_data["days_since_storm"], scoring["recency_curve_days"]
+    )
+    zip_normalized = mappings["zip_tier"].get(zip_tier, 0.0)
+    storm_normalized = input_data["storm_confidence"]
+    owner_normalized = mappings["owner_occupied"].get(input_data["owner_occupied"], 0.0)
 
-    raw_values = {
-        "zip_tier": zip_score,
-        "hail_size": hail_score,
-        "storm_confidence": storm_score,
-        "recency": recency_score,
-        "owner_occupied": owner_score,
+    breakdown = {
+        "zip_tier": {
+            "raw_value": zip_tier,
+            "normalized_value": zip_normalized,
+            "weight": weights["zip_tier"],
+            "contribution": round(zip_normalized * weights["zip_tier"], 6),
+        },
+        "hail_size": {
+            "raw_value": input_data["hail_size_in"],
+            "normalized_value": hail_normalized,
+            "weight": weights["hail_size"],
+            "contribution": round(hail_normalized * weights["hail_size"], 6),
+        },
+        "storm_confidence": {
+            "raw_value": input_data["storm_confidence"],
+            "normalized_value": storm_normalized,
+            "weight": weights["storm_confidence"],
+            "contribution": round(storm_normalized * weights["storm_confidence"], 6),
+        },
+        "recency": {
+            "raw_value": input_data["days_since_storm"],
+            "normalized_value": recency_normalized,
+            "weight": weights["recency"],
+            "contribution": round(recency_normalized * weights["recency"], 6),
+        },
+        "owner_occupied": {
+            "raw_value": input_data["owner_occupied"],
+            "normalized_value": owner_normalized,
+            "weight": weights["owner_occupied"],
+            "contribution": round(owner_normalized * weights["owner_occupied"], 6),
+        },
     }
 
-    score_breakdown = []
-    for component, raw in raw_values.items():
-        w = weights[component]
-        score_breakdown.append({
-            "component": component,
-            "raw_value": raw,
-            "weight": w,
-            "contribution": round(raw * w, 6),
-        })
+    total = max(0.0, min(1.0, sum(c["contribution"] for c in breakdown.values())))
 
-    total = max(0.0, min(1.0, sum(e["contribution"] for e in score_breakdown)))
-
-    components = {
-        e["component"]: {"raw": e["raw_value"], "weight": e["weight"], "weighted": e["contribution"]}
-        for e in score_breakdown
+    buckets = {
+        "hail_size_bucket": _format_hail_bucket(hail_bucket, hail_normalized, scoring["hail_size_curve"]),
+        "recency_bucket": _format_recency_bucket(recency_bucket, recency_normalized),
     }
 
-    return total, components, score_breakdown
+    return total, breakdown, buckets
+
+
+def _format_hail_bucket(matched, normalized, curve):
+    if not matched:
+        return {"min_in": None, "max_in": None, "normalized_value": 0.0}
+    idx = curve.index(matched)
+    max_in = curve[idx + 1]["min"] if idx + 1 < len(curve) else None
+    return {"min_in": matched["min"], "max_in": max_in, "normalized_value": normalized}
+
+
+def _format_recency_bucket(matched, normalized):
+    if not matched:
+        return {"min_days": None, "max_days": None, "normalized_value": 0.0}
+    return {"min_days": 0, "max_days": matched["max_days"], "normalized_value": normalized}
 
 
 def _decide_intent(zip_tier, score, config):
@@ -227,10 +262,11 @@ def _decide_intent(zip_tier, score, config):
     return decision.get("unknown_zip_default", "route_to_human"), "DEFAULT_ROUTE"
 
 
-def _collect_thresholds(config, zip_tier):
-    """Gather the exact config thresholds that were applied."""
+def _collect_thresholds(config, zip_tier, buckets):
+    """Gather the exact config thresholds and selected buckets."""
     hs = config["hard_stops"]
     decision = config["decision"]
+
     thresholds = {
         "hard_stops": {
             "storm_confidence_min": hs["storm_confidence_min"],
@@ -240,19 +276,16 @@ def _collect_thresholds(config, zip_tier):
             "block_unknown_zip": hs.get("block_unknown_zip", True),
             "block_owner_occupied_false": hs.get("block_owner_occupied_false", False),
         },
-        "scoring": {
-            "weights": config["scoring"]["weights"],
-            "hail_size_curve": config["scoring"]["hail_size_curve"],
-            "recency_curve_days": config["scoring"]["recency_curve_days"],
-        },
+        "hail_size_bucket": buckets["hail_size_bucket"],
+        "recency_bucket": buckets["recency_bucket"],
     }
 
     if zip_tier == "A":
-        thresholds["decision"] = {"min_score_book": decision["tier_a_min_score_book"]}
+        thresholds["decision"] = {"tier_min_score_book": decision["tier_a_min_score_book"]}
     elif zip_tier == "B":
         thresholds["decision"] = {
-            "min_score_book": decision["tier_b_min_score_book"],
-            "else": decision.get("tier_b_else", "collect_info_only"),
+            "tier_min_score_book": decision["tier_b_min_score_book"],
+            "gating_fallback": decision.get("tier_b_else", "collect_info_only"),
         }
     elif zip_tier == "C":
         thresholds["decision"] = {"default": decision.get("tier_c_default", "route_to_human")}
@@ -282,13 +315,13 @@ def evaluate_call(input_data, config):
     if hard_stop_reason:
         return _hard_stop_result(lead_id, hard_stop_reason, zip_tier, applied_rules)
 
-    score, components, score_breakdown = _compute_score(input_data, config, zip_tier)
+    score, score_breakdown, buckets = _compute_score(input_data, config, zip_tier)
     applied_rules.append("score_computed")
 
     call_intent, decision_path = _decide_intent(zip_tier, score, config)
     applied_rules.append(f"decision:{call_intent}")
 
-    thresholds_used = _collect_thresholds(config, zip_tier)
+    thresholds_used = _collect_thresholds(config, zip_tier, buckets)
 
     return {
         "lead_id": lead_id,
@@ -297,7 +330,6 @@ def evaluate_call(input_data, config):
         "hard_stop_reason": None,
         "debug": {
             "zip_tier": zip_tier,
-            "score_components": components,
             "applied_rules": applied_rules,
             "decision_path": decision_path,
             "score_breakdown": score_breakdown,

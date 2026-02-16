@@ -178,24 +178,54 @@ class TestConfigValidation:
 
 class TestExplainPayload:
 
-    def test_score_breakdown_present(self, config):
+    def test_score_breakdown_format(self, config):
         result = evaluate_call(_base_input(), config)
         breakdown = result["debug"]["score_breakdown"]
         assert len(breakdown) == 5
-        for entry in breakdown:
-            assert "component" in entry
+        for key in ["zip_tier", "hail_size", "storm_confidence", "recency", "owner_occupied"]:
+            entry = breakdown[key]
             assert "raw_value" in entry
+            assert "normalized_value" in entry
             assert "weight" in entry
             assert "contribution" in entry
+
+    def test_score_breakdown_raw_vs_normalized(self, config):
+        result = evaluate_call(_base_input(zip="76016", hail_size_in=1.5), config)
+        bd = result["debug"]["score_breakdown"]
+        assert bd["zip_tier"]["raw_value"] == "A"
+        assert bd["zip_tier"]["normalized_value"] == 1.0
+        assert bd["hail_size"]["raw_value"] == 1.5
+        assert bd["hail_size"]["normalized_value"] == 1.0
+        assert bd["owner_occupied"]["raw_value"] == "true"
+        assert bd["owner_occupied"]["normalized_value"] == 1.0
 
     def test_decision_path_hard_stop(self, config):
         result = evaluate_call(_base_input(capacity_remaining=0), config)
         assert result["debug"]["decision_path"] == "HARD_STOP"
 
-    def test_thresholds_used_present(self, config):
-        result = evaluate_call(_base_input(), config)
+    def test_thresholds_used_buckets(self, config):
+        result = evaluate_call(_base_input(hail_size_in=1.5, days_since_storm=20), config)
         thresholds = result["debug"]["thresholds_used"]
         assert "hard_stops" in thresholds
-        assert "scoring" in thresholds
         assert "decision" in thresholds
-        
+        hb = thresholds["hail_size_bucket"]
+        assert hb["min_in"] == 1.5
+        assert hb["max_in"] is None
+        assert hb["normalized_value"] == 1.0
+        rb = thresholds["recency_bucket"]
+        assert rb["max_days"] == 30
+        assert rb["normalized_value"] == 1.0
+
+    def test_thresholds_decision_tier_a(self, config):
+        result = evaluate_call(_base_input(zip="76016"), config)
+        assert "tier_min_score_book" in result["debug"]["thresholds_used"]["decision"]
+
+    def test_thresholds_decision_tier_b(self, config):
+        result = evaluate_call(
+            _base_input(zip="76010", hail_size_in=1.5, storm_confidence=0.9,
+                        days_since_storm=20, owner_occupied="true"),
+            config,
+        )
+        decision_t = result["debug"]["thresholds_used"]["decision"]
+        assert "tier_min_score_book" in decision_t
+        assert "gating_fallback" in decision_t
