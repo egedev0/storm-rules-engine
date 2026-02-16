@@ -1,0 +1,51 @@
+zip_tiers:
+  A: ["76016", "76063"]
+  B: ["76010", "76011"]
+  C: ["76101", "76102"]
+
+hard_stops:
+  capacity_zero: true
+  storm_confidence_min: 0.35
+  hail_size_min_in: 1.00
+  days_since_storm_max: 365
+  block_unknown_zip: true
+  block_owner_occupied_false: false
+
+scoring:
+  weights:
+    zip_tier: 0.35
+    hail_size: 0.25
+    storm_confidence: 0.25
+    recency: 0.10
+    owner_occupied: 0.05
+
+  mappings:
+    zip_tier:
+      A: 1.0
+      B: 0.6
+      C: 0.3
+      UNKNOWN: 0.0
+    owner_occupied:
+      "true": 1.0
+      "unknown": 0.5
+      "false": 0.0
+
+  hail_size_curve:
+    - { min: 0.00, score: 0.0 }
+    - { min: 1.00, score: 0.6 }
+    - { min: 1.25, score: 0.8 }
+    - { min: 1.50, score: 1.0 }
+
+  recency_curve_days:
+    - { max_days: 30, score: 1.0 }
+    - { max_days: 90, score: 0.7 }
+    - { max_days: 180, score: 0.5 }
+    - { max_days: 365, score: 0.3 }
+    - { max_days: 99999, score: 0.0 }
+
+decision:
+  tier_a_min_score_book: 0.70
+  tier_b_min_score_book: 0.80
+  tier_b_else: "collect_info_only"
+  tier_c_default: "route_to_human"
+  unknown_zip_default: "route_to_human"
