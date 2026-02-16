@@ -1,3 +1,4 @@
+import copy
 import yaml
 import pytest
 from rules_engine import evaluate_call
@@ -70,6 +71,7 @@ class TestScoringAndDecision:
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "book_now"
         assert result["confidence_level"] > 0.0
+        assert result["debug"]["decision_path"] == "SCORE_BOOK"
 
     def test_tier_a_below_threshold(self, config):
         result = evaluate_call(
@@ -79,6 +81,7 @@ class TestScoringAndDecision:
         )
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "collect_info_only"
+        assert result["debug"]["decision_path"] == "SCORE_GATE"
 
     def test_tier_b_book_now(self, config):
         result = evaluate_call(
@@ -106,6 +109,7 @@ class TestScoringAndDecision:
         )
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "route_to_human"
+        assert result["debug"]["decision_path"] == "DEFAULT_ROUTE"
 
 
 class TestBorderlineCases:
@@ -134,3 +138,64 @@ class TestBorderlineCases:
         result = evaluate_call(_base_input(days_since_storm=366), config)
         assert result["hard_stop_reason"] == "TOO_OLD"
 
+
+class TestConfigValidation:
+
+    def test_missing_top_level_key(self, config):
+        bad = copy.deepcopy(config)
+        del bad["scoring"]
+        result = evaluate_call(_base_input(), bad)
+        assert result["hard_stop_reason"] == "INVALID_CONFIG"
+
+    def test_weights_dont_sum_to_one(self, config):
+        bad = copy.deepcopy(config)
+        bad["scoring"]["weights"]["zip_tier"] = 0.99
+        result = evaluate_call(_base_input(), bad)
+        assert result["hard_stop_reason"] == "INVALID_CONFIG"
+
+    def test_missing_weight_key(self, config):
+        bad = copy.deepcopy(config)
+        del bad["scoring"]["weights"]["recency"]
+        result = evaluate_call(_base_input(), bad)
+        assert result["hard_stop_reason"] == "INVALID_CONFIG"
+
+    def test_empty_hail_curve(self, config):
+        bad = copy.deepcopy(config)
+        bad["scoring"]["hail_size_curve"] = []
+        result = evaluate_call(_base_input(), bad)
+        assert result["hard_stop_reason"] == "INVALID_CONFIG"
+
+    def test_missing_recency_curve(self, config):
+        bad = copy.deepcopy(config)
+        del bad["scoring"]["recency_curve_days"]
+        result = evaluate_call(_base_input(), bad)
+        assert result["hard_stop_reason"] == "INVALID_CONFIG"
+
+    def test_valid_config_passes(self, config):
+        result = evaluate_call(_base_input(), config)
+        assert result["hard_stop_reason"] is None
+
+
+class TestExplainPayload:
+
+    def test_score_breakdown_present(self, config):
+        result = evaluate_call(_base_input(), config)
+        breakdown = result["debug"]["score_breakdown"]
+        assert len(breakdown) == 5
+        for entry in breakdown:
+            assert "component" in entry
+            assert "raw_value" in entry
+            assert "weight" in entry
+            assert "contribution" in entry
+
+    def test_decision_path_hard_stop(self, config):
+        result = evaluate_call(_base_input(capacity_remaining=0), config)
+        assert result["debug"]["decision_path"] == "HARD_STOP"
+
+    def test_thresholds_used_present(self, config):
+        result = evaluate_call(_base_input(), config)
+        thresholds = result["debug"]["thresholds_used"]
+        assert "hard_stops" in thresholds
+        assert "scoring" in thresholds
+        assert "decision" in thresholds
+        
