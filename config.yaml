@@ -49,3 +49,10 @@ decision:
   tier_b_else: "collect_info_only"
   tier_c_default: "route_to_human"
   unknown_zip_default: "route_to_human"
+
+batch_defaults:
+  storm_date: "2025-02-05"
+  hail_size_in: 1.5
+  storm_confidence: 0.9
+  owner_occupied: "unknown"
+  capacity_remaining: 10
