@@ -106,6 +106,66 @@ def _check_hard_stops(input_data, config, zip_tier):
     return None, applied
 
 
+def _lookup_curve(value, curve, key_field):
+    """Walk a sorted curve and return the score for the highest matching bracket."""
+    result = 0.0
+    for entry in curve:
+        if value >= entry[key_field]:
+            result = entry["score"]
+        else:
+            break
+    return result
+
+
+def _lookup_recency(days, curve):
+    """First bracket where max_days >= days wins."""
+    for entry in curve:
+        if days <= entry["max_days"]:
+            return entry["score"]
+    return 0.0
+
+
+def _compute_score(input_data, config, zip_tier):
+    """Weighted sum of scoring components, clipped to [0, 1]."""
+    scoring = config["scoring"]
+    weights = scoring["weights"]
+    mappings = scoring["mappings"]
+
+    zip_score = mappings["zip_tier"].get(zip_tier, 0.0)
+    hail_score = _lookup_curve(input_data["hail_size_in"], scoring["hail_size_curve"], "min")
+    storm_score = input_data["storm_confidence"]
+    recency_score = _lookup_recency(input_data["days_since_storm"], scoring["recency_curve_days"])
+    owner_score = mappings["owner_occupied"].get(input_data["owner_occupied"], 0.0)
+
+    components = {
+        "zip_tier": {"raw": zip_score, "weight": weights["zip_tier"], "weighted": zip_score * weights["zip_tier"]},
+        "hail_size": {"raw": hail_score, "weight": weights["hail_size"], "weighted": hail_score * weights["hail_size"]},
+        "storm_confidence": {"raw": storm_score, "weight": weights["storm_confidence"], "weighted": storm_score * weights["storm_confidence"]},
+        "recency": {"raw": recency_score, "weight": weights["recency"], "weighted": recency_score * weights["recency"]},
+        "owner_occupied": {"raw": owner_score, "weight": weights["owner_occupied"], "weighted": owner_score * weights["owner_occupied"]},
+    }
+
+    total = max(0.0, min(1.0, sum(c["weighted"] for c in components.values())))
+    return total, components
+
+
+def _decide_intent(zip_tier, score, config):
+    decision = config["decision"]
+
+    if zip_tier == "A":
+        return "book_now" if score >= decision["tier_a_min_score_book"] else "collect_info_only"
+
+    if zip_tier == "B":
+        if score >= decision["tier_b_min_score_book"]:
+            return "book_now"
+        return decision.get("tier_b_else", "collect_info_only")
+
+    if zip_tier == "C":
+        return decision.get("tier_c_default", "route_to_human")
+
+    return decision.get("unknown_zip_default", "route_to_human")
+
+
 def evaluate_call(input_data, config):
     """Evaluate a single lead against the rules config and return a decision dict."""
 
@@ -121,14 +181,20 @@ def evaluate_call(input_data, config):
     if hard_stop_reason:
         return _hard_stop_result(lead_id, hard_stop_reason, zip_tier, applied_rules)
 
+    score, components = _compute_score(input_data, config, zip_tier)
+    applied_rules.append("score_computed")
+
+    call_intent = _decide_intent(zip_tier, score, config)
+    applied_rules.append(f"decision:{call_intent}")
+
     return {
         "lead_id": lead_id,
-        "confidence_level": 0.0,
-        "call_intent": "route_to_human",
+        "confidence_level": round(score, 4),
+        "call_intent": call_intent,
         "hard_stop_reason": None,
         "debug": {
             "zip_tier": zip_tier,
-            "score_components": {},
+            "score_components": components,
             "applied_rules": applied_rules,
         },
     }
