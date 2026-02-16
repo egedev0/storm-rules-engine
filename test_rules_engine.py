@@ -71,7 +71,7 @@ class TestScoringAndDecision:
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "book_now"
         assert result["confidence_level"] > 0.0
-        assert result["debug"]["decision_path"] == "SCORE_BOOK"
+        assert result["explain"]["decision_path"] == "SCORE_BOOK"
 
     def test_tier_a_below_threshold(self, config):
         result = evaluate_call(
@@ -81,7 +81,7 @@ class TestScoringAndDecision:
         )
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "collect_info_only"
-        assert result["debug"]["decision_path"] == "SCORE_GATE"
+        assert result["explain"]["decision_path"] == "SCORE_GATE"
 
     def test_tier_b_book_now(self, config):
         result = evaluate_call(
@@ -109,7 +109,7 @@ class TestScoringAndDecision:
         )
         assert result["hard_stop_reason"] is None
         assert result["call_intent"] == "route_to_human"
-        assert result["debug"]["decision_path"] == "DEFAULT_ROUTE"
+        assert result["explain"]["decision_path"] == "DEFAULT_ROUTE"
 
 
 class TestBorderlineCases:
@@ -180,7 +180,7 @@ class TestExplainPayload:
 
     def test_score_breakdown_format(self, config):
         result = evaluate_call(_base_input(), config)
-        breakdown = result["debug"]["score_breakdown"]
+        breakdown = result["explain"]["score_breakdown"]
         assert len(breakdown) == 5
         for key in ["zip_tier", "hail_size", "storm_confidence", "recency", "owner_occupied"]:
             entry = breakdown[key]
@@ -191,7 +191,7 @@ class TestExplainPayload:
 
     def test_score_breakdown_raw_vs_normalized(self, config):
         result = evaluate_call(_base_input(zip="76016", hail_size_in=1.5), config)
-        bd = result["debug"]["score_breakdown"]
+        bd = result["explain"]["score_breakdown"]
         assert bd["zip_tier"]["raw_value"] == "A"
         assert bd["zip_tier"]["normalized_value"] == 1.0
         assert bd["hail_size"]["raw_value"] == 1.5
@@ -201,11 +201,11 @@ class TestExplainPayload:
 
     def test_decision_path_hard_stop(self, config):
         result = evaluate_call(_base_input(capacity_remaining=0), config)
-        assert result["debug"]["decision_path"] == "HARD_STOP"
+        assert result["explain"]["decision_path"] == "HARD_STOP"
 
     def test_thresholds_used_buckets(self, config):
         result = evaluate_call(_base_input(hail_size_in=1.5, days_since_storm=20), config)
-        thresholds = result["debug"]["thresholds_used"]
+        thresholds = result["explain"]["thresholds_used"]
         assert "hard_stops" in thresholds
         assert "decision" in thresholds
         hb = thresholds["hail_size_bucket"]
@@ -218,7 +218,7 @@ class TestExplainPayload:
 
     def test_thresholds_decision_tier_a(self, config):
         result = evaluate_call(_base_input(zip="76016"), config)
-        assert "tier_min_score_book" in result["debug"]["thresholds_used"]["decision"]
+        assert "tier_min_score_book" in result["explain"]["thresholds_used"]["decision"]
 
     def test_thresholds_decision_tier_b(self, config):
         result = evaluate_call(
@@ -226,6 +226,6 @@ class TestExplainPayload:
                         days_since_storm=20, owner_occupied="true"),
             config,
         )
-        decision_t = result["debug"]["thresholds_used"]["decision"]
+        decision_t = result["explain"]["thresholds_used"]["decision"]
         assert "tier_min_score_book" in decision_t
         assert "gating_fallback" in decision_t

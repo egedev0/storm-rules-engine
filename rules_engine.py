@@ -100,7 +100,7 @@ def _hard_stop_result(lead_id, reason, zip_tier, applied_rules):
         "confidence_level": 0.0,
         "call_intent": "route_to_human",
         "hard_stop_reason": reason,
-        "debug": {
+        "explain": {
             "zip_tier": zip_tier,
             "score_components": {},
             "applied_rules": applied_rules,
@@ -328,7 +328,7 @@ def evaluate_call(input_data, config):
         "confidence_level": round(score, 4),
         "call_intent": call_intent,
         "hard_stop_reason": None,
-        "debug": {
+        "explain": {
             "zip_tier": zip_tier,
             "applied_rules": applied_rules,
             "decision_path": decision_path,
