@@ -1,0 +1,123 @@
+{
+  "name": "EVAL_LEAD",
+  "nodes": [
+    {
+      "parameters": {},
+      "id": "trigger-1",
+      "name": "Manual Trigger",
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [220, 300]
+    },
+    {
+      "parameters": {
+        "operation": "read",
+        "sheetId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1CS7"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "DailerQue"
+        },
+        "filtersUI": {
+          "values": [
+            {
+              "lookupColumn": "contact_strategy",
+              "lookupValue": "call"
+            }
+          ]
+        },
+        "options": {
+          "returnOnlyFirstMatch": true
+        }
+      },
+      "id": "sheet-read-1",
+      "name": "Read CALL_READY Row",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [440, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "PASTE_CREDENTIAL_ID",
+          "name": "Google Sheets account 4"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "http://t0ocggokk44w8s0swsogwkcs.46.62.199.231.sslip.io/process_lead",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-API-KEY",
+              "value": "sentinel-eval-2026"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify($json) }}"
+      },
+      "id": "http-1",
+      "name": "Run EVAL_LEAD",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [660, 300]
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "sheetId": {
+          "__rl": true,
+          "mode": "url",
+          "value": "https://docs.google.com/spreadsheets/d/1CS7"
+        },
+        "sheetName": {
+          "__rl": true,
+          "mode": "name",
+          "value": "DailerQue"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "matchingColumns": ["Address"]
+        }
+      },
+      "id": "sheet-write-1",
+      "name": "Write Result to Sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.5,
+      "position": [880, 300],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "PASTE_CREDENTIAL_ID",
+          "name": "Google Sheets account 4"
+        }
+      }
+    }
+  ],
+  "connections": {
+    "Manual Trigger": {
+      "main": [
+        [{ "node": "Read CALL_READY Row", "type": "main", "index": 0 }]
+      ]
+    },
+    "Read CALL_READY Row": {
+      "main": [
+        [{ "node": "Run EVAL_LEAD", "type": "main", "index": 0 }]
+      ]
+    },
+    "Run EVAL_LEAD": {
+      "main": [
+        [{ "node": "Write Result to Sheet", "type": "main", "index": 0 }]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  }
+}

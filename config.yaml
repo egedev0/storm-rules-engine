@@ -51,7 +51,7 @@ decision:
   unknown_zip_default: "route_to_human"
 
 batch_defaults:
-  storm_date: "2025-02-05"
+  storm_date: "2025-03-08"
   hail_size_in: 1.5
   storm_confidence: 0.9
   owner_occupied: "unknown"

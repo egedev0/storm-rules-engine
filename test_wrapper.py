@@ -130,7 +130,7 @@ class TestMapSheetRow:
 
     def test_days_since_storm_from_default_date(self, config):
         mapped = map_sheet_row(_sheet_row(), config)
-        expected = (date.today() - date(2025, 2, 5)).days
+        expected = (date.today() - date(2025, 3, 8)).days
         assert mapped["days_since_storm"] == expected
 
     def test_lead_id_from_owner_name(self, config):
