@@ -29,4 +29,5 @@ async def handle_process_lead(
     body = await request.json()
     debug = body.pop("debug", False)
     result = process_lead(body, config, debug=debug)
+    result["Address"] = body.get("Address", "")
     return result
