@@ -149,3 +149,15 @@ class TestMapSheetRow:
         assert result["call_intent"] in ("book_now", "collect_info_only", "route_to_human")
         assert isinstance(result["booking_allowed"], bool)
         assert isinstance(result["confidence_level"], float)
+
+    def test_non_numeric_hail_returns_invalid_input(self, config):
+        result = process_lead(_sheet_row(hail_size_in="abc"), config)
+        assert result["call_intent"] == "route_to_human"
+        assert result["booking_allowed"] is False
+        assert result["hard_stop_reason"] == "INVALID_INPUT"
+
+    def test_non_numeric_confidence_returns_invalid_input(self, config):
+        result = process_lead(_sheet_row(storm_confidence="xyz"), config)
+        assert result["call_intent"] == "route_to_human"
+        assert result["booking_allowed"] is False
+        assert result["hard_stop_reason"] == "INVALID_INPUT"

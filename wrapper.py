@@ -36,12 +36,14 @@ def _parse_date(value):
     return None
 
 
-def _coerce_float(value, default):
+def _coerce_float(value, default, strict=False):
     if value is None or value == "":
         return default
     try:
         return float(value)
     except (ValueError, TypeError):
+        if strict:
+            return None
         return default
 
 
@@ -67,8 +69,8 @@ def map_sheet_row(row, config):
     else:
         days_since = 0
 
-    hail = _coerce_float(row.get("hail_size_in"), defaults.get("hail_size_in", 1.0))
-    confidence = _coerce_float(row.get("storm_confidence"), defaults.get("storm_confidence", 0.5))
+    hail = _coerce_float(row.get("hail_size_in"), defaults.get("hail_size_in", 1.0), strict=True)
+    confidence = _coerce_float(row.get("storm_confidence"), defaults.get("storm_confidence", 0.5), strict=True)
     owner = row.get("owner_occupied") or defaults.get("owner_occupied", "unknown")
     capacity = _coerce_int(row.get("capacity_remaining"), defaults.get("capacity_remaining", 10))
 
@@ -91,6 +93,16 @@ def map_sheet_row(row, config):
 
 def process_lead(lead_row, config, debug=False):
     mapped = map_sheet_row(lead_row, config)
+
+    if mapped["hail_size_in"] is None or mapped["storm_confidence"] is None:
+        return {
+            "lead_id": mapped["lead_id"],
+            "call_intent": "route_to_human",
+            "booking_allowed": False,
+            "confidence_level": 0.0,
+            "hard_stop_reason": "INVALID_INPUT",
+        }
+
     result = evaluate_call(mapped, config)
 
     output = {
